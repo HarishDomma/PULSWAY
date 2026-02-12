@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseWay | Emergency Traffic AI</title>
+    
+    <!-- External Assets -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --bg-dark: #0f172a;
+        }
+
+        body {
+            background-color: #f1f5f9;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 12px;
+            z-index: 1;
+        }
+
+        #sidebar {
+            transition: transform 0.3s ease-in-out;
+            z-index: 2000;
+        }
+
+        .sidebar-closed { transform: translateX(-100%); }
+        .sidebar-open { transform: translateX(0); }
+
+        .light-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            transition: background-color 0.3s;
+        }
+        .light-red { background-color: var(--danger); box-shadow: 0 0 15px var(--danger); }
+        .light-green { background-color: var(--success); box-shadow: 0 0 15px var(--success); }
+
+        .log-container::-webkit-scrollbar { width: 4px; }
+        .log-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        @keyframes pulse-incoming {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.9; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .btn-emergency {
+            animation: pulse-red 2s infinite;
+        }
+
+        .incoming-call-overlay {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            z-index: 9999;
+        }
+
+        .call-card {
+            animation: pulse-incoming 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800">
+
+    <!-- Incoming Call Modal -->
+    <div id="callOverlay" class="fixed inset-0 incoming-call-overlay flex items-center justify-center p-4 hidden">
+        <div class="call-card bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center border-4 border-red-500">
+            <div class="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl">
+                🚨
+            </div>
+            <h2 class="text-2xl font-black text-slate-900 mb-2 uppercase tracking-tight">Priority Dispatch</h2>
+            <p class="text-slate-500 mb-6 text-sm font-medium">Critical Traffic Accident reported at <br><span class="text-slate-900 font-bold">Indiranagar Junction</span></p>
+            <div class="space-y-3">
+                <button onclick="acceptCall()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-red-200">
+                    ACCEPT MISSION
+                </button>
+                <button onclick="dismissCall()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold py-3 rounded-2xl transition-all text-xs">
+                    IGNORE (RESTRICTED)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar Menu -->
+    <div id="sidebar" class="fixed inset-y-0 left-0 w-72 bg-slate-900 text-white p-6 sidebar-closed shadow-2xl">
+        <div class="flex justify-between items-center mb-10">
+            <h2 class="text-xl font-bold">PulseWay Menu</h2>
+            <button onclick="toggleMenu()" class="text-slate-400 hover:text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+        
+        <nav class="space-y-1">
+            <a href="#" onclick="showPage('dashboard')" class="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-800 transition">
+                <span>🏠</span> <span>Dashboard</span>
+            </a>
+            <a href="#" onclick="showPage('history')" class="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-800 transition">
+                <span>📅</span> <span>Mission History</span>
+            </a>
+            <a href="#" onclick="showPage('settings')" class="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-800 transition">
+                <span>⚙️</span> <span>System Config</span>
+            </a>
+            <hr class="border-slate-800 my-4">
+            <a href="#" onclick="showPage('care')" class="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-800 transition">
+                <span>🚑</span> <span>Fleet Management</span>
+            </a>
+        </nav>
+        
+        <div class="absolute bottom-6 left-6 text-xs text-slate-500">
+            v2.2.0-MISSION-READY
+        </div>
+    </div>
+
+    <!-- Main Content Wrapper -->
+    <div id="main-content" class="transition-all duration-300">
+        <!-- Navbar -->
+        <nav class="bg-slate-900 text-white p-4 shadow-xl sticky top-0 z-[1000]">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+                <div class="flex items-center space-x-4">
+                    <button onclick="toggleMenu()" class="p-2 hover:bg-slate-800 rounded-lg">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <div class="flex items-center space-x-2">
+                        <div class="p-1.5 bg-blue-600 rounded">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+                        </div>
+                        <h1 class="text-lg font-bold">LifeLineX</h1>
+                    </div>
+                </div>
+                <div id="systemStatus" class="flex items-center space-x-2 px-3 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/50">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="text-xs font-bold uppercase tracking-tight">Active Duty</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Page Container -->
+        <div id="page-container" class="max-w-7xl mx-auto p-4 md:p-6 overflow-y-auto" style="height: calc(100vh - 72px);">
+            
+            <div id="page-dashboard" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Map and Stats -->
+                <div class="lg:col-span-9 space-y-6">
+                    <div class="bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
+                        <div id="map"></div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="glass-card p-5 rounded-2xl border border-slate-200">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase">Mission Objective</p>
+                            <h3 id="statStatus" class="text-lg font-bold text-slate-600">Awaiting Dispatch</h3>
+                            <div id="progressContainer" class="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden hidden">
+                                <div id="progressBar" class="bg-blue-600 h-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="glass-card p-5 rounded-2xl border border-slate-200">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase">Signal AI State</p>
+                            <div class="flex items-center justify-between mt-1">
+                                <h3 id="signalStatus" class="text-lg font-bold">Standard Flow</h3>
+                                <div id="activeSignalIndicator" class="w-4 h-4 rounded-full bg-slate-400"></div>
+                            </div>
+                        </div>
+                        <div class="glass-card p-5 rounded-2xl border border-slate-200">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase">Proximity to Scene</p>
+                            <div class="flex items-end space-x-1 mt-1">
+                                <span id="distVal" class="text-2xl font-black text-blue-600">--</span>
+                                <span class="text-xs text-slate-400 pb-1">meters</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Terminal -->
+                    <div class="bg-slate-900 rounded-2xl overflow-hidden shadow-xl">
+                        <div id="logBox" class="log-container h-32 p-4 font-mono text-[10px] text-blue-300 overflow-y-auto space-y-1">
+                            <p class="text-slate-500 italic">-- LifeLineX Fleet Communication Initialized --</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Driver Controls -->
+                <div class="lg:col-span-3">
+                    <div class="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 sticky top-24">
+                        <h2 class="text-xs font-bold text-slate-400 uppercase mb-6 tracking-widest">Tactical Console</h2>
+                        
+                        <div class="space-y-6">
+                            <!-- Phase 1: Not yet arrived at accident -->
+                            <div id="dispatchInfo" class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">Current Task</p>
+                                <p id="currentTaskDesc" class="text-sm font-bold text-slate-900 italic">Standby at Base</p>
+                            </div>
+
+                            <!-- Phase 2: Arrived, ready for pickup -->
+                            <div id="emergencyCtrl" class="hidden">
+                                <button onclick="triggerEmergencyReturn()" id="btnEmergency" class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-8 px-4 rounded-3xl transition-all shadow-xl shadow-red-200 flex flex-col items-center justify-center gap-2 btn-emergency">
+                                    <span class="text-3xl">🚨</span>
+                                    <span class="uppercase tracking-tighter text-xl leading-none">START PICKUP</span>
+                                    <span class="text-[10px] opacity-70 font-normal mt-1">AI Green-Wave Return</span>
+                                </button>
+                            </div>
+
+                            <div id="activeCtrl" class="hidden space-y-3">
+                                <div class="p-4 bg-green-50 rounded-xl border border-green-100">
+                                    <p class="text-[10px] font-bold text-green-400 uppercase mb-1">Emergency Phase</p>
+                                    <p class="text-sm font-bold text-green-900">Hospital Return Active</p>
+                                </div>
+                                <button onclick="resetSimulation()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-xl transition-all text-sm">
+                                    Reset Mission
+                                </button>
+                            </div>
+
+                            <div class="pt-6 border-t border-slate-100">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase">Telemetry Link</label>
+                                <div class="mt-2 flex items-center justify-between text-xs font-bold">
+                                    <span class="text-blue-600">V2X Mesh Active</span>
+                                    <span class="text-green-500">9ms</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Generic Page Template -->
+            <div id="page-generic" class="hidden bg-white p-10 rounded-3xl shadow-sm border border-slate-200 min-h-[400px] flex flex-col items-center justify-center text-center">
+                <div id="generic-icon" class="text-6xl mb-4">⚙️</div>
+                <h2 id="generic-title" class="text-2xl font-bold mb-2">Settings</h2>
+                <p id="generic-desc" class="text-slate-500 max-w-md">Protected administrative interface.</p>
+                <button onclick="showPage('dashboard')" class="mt-8 px-6 py-2 bg-slate-900 text-white rounded-xl font-bold text-sm">Return</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const CONFIG = {
+            hospital: [12.9800, 77.6100],
+            accidentZone: [12.9650, 77.5850],
+            center: [12.9716, 77.5946],
+            signals: [
+                { id: 1, pos: [12.9760, 77.6050], state: 'red', passed: false },
+                { id: 2, pos: [12.9720, 77.5980], state: 'red', passed: false },
+                { id: 3, pos: [12.9675, 77.5900], state: 'red', passed: false }
+            ]
+        };
+
+        // --- Global State ---
+        let map = null;
+        let ambulanceMarker = null;
+        let signalMarkers = [];
+        let isMoving = false;
+        let missionPhase = 'idle'; // idle, dispatching, at_scene, emergency_return, finished
+        let routeSteps = [];
+        let currentStep = 0;
+
+        // --- Init Functions ---
+        function initApp() {
+            map = L.map('map', { 
+                zoomControl: false, 
+                attributionControl: false 
+            }).setView(CONFIG.center, 14);
+            
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+            // 1. Hospital Marker
+            const hospIcon = L.divIcon({
+                html: `<div style="font-size: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2))">🏥</div>`,
+                className: '', iconSize: [35, 35], iconAnchor: [17, 30]
+            });
+            L.marker(CONFIG.hospital, { icon: hospIcon }).addTo(map).bindTooltip("City General Hospital", { permanent: true, direction: 'top', offset: [0, -25] });
+
+            // 2. Accident Zone Marker
+            const accIcon = L.divIcon({
+                html: `<div style="font-size: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2))">⚠️</div>`,
+                className: '', iconSize: [35, 35], iconAnchor: [17, 30]
+            });
+            L.marker(CONFIG.accidentZone, { icon: accIcon }).addTo(map).bindTooltip("Accident Zone", { permanent: false, direction: 'top' });
+
+            // 3. Ambulance Initial Position (At Hospital)
+            const ambIcon = L.divIcon({
+                html: `<div style="font-size: 24px;">🚑</div>`,
+                className: '', iconSize: [30, 30], iconAnchor: [15, 15]
+            });
+            ambulanceMarker = L.marker(CONFIG.hospital, { icon: ambIcon }).addTo(map);
+
+            initSignals();
+            
+            // Show incoming call after 1.5s
+            setTimeout(() => {
+                document.getElementById('callOverlay').classList.remove('hidden');
+            }, 1500);
+        }
+
+        function initSignals() {
+            signalMarkers.forEach(m => map.removeLayer(m));
+            signalMarkers = [];
+            
+            CONFIG.signals.forEach(s => {
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div id="sig-${s.id}" class="light-icon light-red"></div>`,
+                    iconSize: [16, 16], iconAnchor: [8, 8]
+                });
+                const marker = L.marker(s.pos, { icon: icon }).addTo(map);
+                signalMarkers.push(marker);
+                s.state = 'red';
+                s.passed = false;
+            });
+        }
+
+        // --- Call Handling ---
+        function acceptCall() {
+            document.getElementById('callOverlay').classList.add('hidden');
+            missionPhase = 'dispatching';
+            log("DISPATCH ACCEPTED: Unit moving to Accident Zone", "text-blue-400 font-bold");
+            
+            document.getElementById('statStatus').innerText = "Phase 1: Dispatching";
+            document.getElementById('progressContainer').classList.remove('hidden');
+            document.getElementById('currentTaskDesc').innerText = "En-route to Scene";
+            
+            generatePath(CONFIG.hospital, CONFIG.accidentZone);
+            currentStep = 0;
+            animateMove();
+        }
+
+        function dismissCall() {
+            log("WARNING: Emergency request bypassed. Restricted action.", "text-red-400");
+            document.getElementById('callOverlay').classList.add('hidden');
+        }
+
+        // --- Emergency Trigger (Phase 2) ---
+        function triggerEmergencyReturn() {
+            missionPhase = 'emergency_return';
+            document.getElementById('emergencyCtrl').classList.add('hidden');
+            document.getElementById('activeCtrl').classList.remove('hidden');
+            document.getElementById('statStatus').innerText = "Phase 2: Priority Return";
+            document.getElementById('statStatus').classList.add('text-red-600');
+            
+            log("EMERGENCY SIGNAL BROADCASTED", "text-red-500 font-bold");
+            log("AI Override: Requesting Green Wave to Hospital", "text-white underline");
+            
+            generatePath(CONFIG.accidentZone, CONFIG.hospital);
+            currentStep = 0;
+            animateMove();
+        }
+
+        // --- Core Movement ---
+        function generatePath(start, end) {
+            routeSteps = [];
+            const steps = 150; 
+            for(let i=0; i<=steps; i++) {
+                routeSteps.push([
+                    start[0] + (end[0] - start[0]) * (i/steps),
+                    start[1] + (end[1] - start[1]) * (i/steps)
+                ]);
+            }
+        }
+
+        function animateMove() {
+            if (currentStep >= routeSteps.length) {
+                handleArrival();
+                return;
+            }
+
+            const pos = routeSteps[currentStep];
+            ambulanceMarker.setLatLng(pos);
+            
+            if (currentStep % 10 === 0) map.panTo(pos);
+
+            // Signal Logic only in Phase 2
+            if (missionPhase === 'emergency_return') {
+                updateAISignals(pos);
+            }
+
+            const progress = (currentStep / (routeSteps.length-1)) * 100;
+            document.getElementById('progressBar').style.width = progress + "%";
+
+            currentStep++;
+            setTimeout(animateMove, missionPhase === 'emergency_return' ? 80 : 120);
+        }
+
+        function handleArrival() {
+            if (missionPhase === 'dispatching') {
+                missionPhase = 'at_scene';
+                log("ARRIVAL: Unit reached Accident Zone. Secured scene.", "text-yellow-400 font-bold");
+                document.getElementById('statStatus').innerText = "Arrived at Scene";
+                document.getElementById('currentTaskDesc').innerText = "Patient Pickup In-Progress";
+                document.getElementById('emergencyCtrl').classList.remove('hidden');
+                document.getElementById('distVal').innerText = "0";
+            } else if (missionPhase === 'emergency_return') {
+                missionPhase = 'finished';
+                log("MISSION SUCCESS: Patient delivered to Hospital.", "text-green-500 font-bold");
+                document.getElementById('statStatus').innerText = "Unit Back at Base";
+                document.getElementById('statStatus').className = "text-lg font-bold text-green-600";
+            }
+        }
+
+        function updateAISignals(pos) {
+            let nextDist = Infinity;
+            let activeFound = false;
+
+            CONFIG.signals.forEach(s => {
+                const dist = L.latLng(pos).distanceTo(L.latLng(s.pos));
+                const el = document.getElementById(`sig-${s.id}`);
+                
+                // Open signals ahead (Changed to 1000m / 1km per request)
+                if (!s.passed && dist < 1000) {
+                    if (s.state !== 'green') {
+                        s.state = 'green';
+                        if(el) el.className = 'light-icon light-green';
+                        log(`AI CONTROL: SIG #${s.id} CLEARED (Ambulance within 1km)`, "text-green-400 font-bold");
+                    }
+                    activeFound = true;
+                    nextDist = Math.min(nextDist, dist);
+                }
+
+                // Close behind (150m past)
+                if (s.state === 'green' && dist > 150) {
+                    const latDiff = Math.abs(pos[0] - s.pos[0]);
+                    const lngDiff = Math.abs(pos[1] - s.pos[1]);
+                    
+                    // Simple logic to check if we've passed it based on route direction (returning to hospital)
+                    // In this specific sim, hospital is North/East of accident
+                    if (pos[0] > s.pos[0] || pos[1] > s.pos[1]) {
+                        s.state = 'red';
+                        s.passed = true;
+                        if(el) el.className = 'light-icon light-red';
+                        log(`AI CONTROL: SIG #${s.id} RESTORED`, "text-slate-500");
+                    }
+                }
+            });
+
+            const signalIndicator = document.getElementById('activeSignalIndicator');
+            const signalStatus = document.getElementById('signalStatus');
+            const distLabel = document.getElementById('distVal');
+
+            if (activeFound) {
+                signalIndicator.className = 'w-4 h-4 rounded-full bg-green-500';
+                signalStatus.innerText = "Override Active";
+                distLabel.innerText = Math.round(nextDist);
+            } else {
+                signalIndicator.className = 'w-4 h-4 rounded-full bg-slate-400';
+                signalStatus.innerText = "Standard Flow";
+                distLabel.innerText = "--";
+            }
+        }
+
+        // --- UI Utilities ---
+        function toggleMenu() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('sidebar-closed');
+            sidebar.classList.toggle('sidebar-open');
+        }
+
+        function log(msg, color = 'text-blue-300') {
+            const logBox = document.getElementById('logBox');
+            const p = document.createElement('p');
+            p.className = color;
+            p.innerHTML = `<span class="opacity-30 mr-2">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+            logBox.prepend(p);
+        }
+
+        function showPage(pageId) {
+            toggleMenu();
+            const dashboard = document.getElementById('page-dashboard');
+            const generic = document.getElementById('page-generic');
+            if (pageId === 'dashboard') { dashboard.classList.remove('hidden'); generic.classList.add('hidden'); }
+            else { dashboard.classList.add('hidden'); generic.classList.remove('hidden'); }
+        }
+
+        function resetSimulation() {
+            location.reload();
+        }
+
+        window.addEventListener('load', initApp);
+    </script>
+</body>
+</html>
